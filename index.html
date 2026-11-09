@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MYX 補倉套利計算器</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f27;--mu:#6b7280;--bd:#e3e6ea;--ac:#c9930a;--gr:#0f9d58;--rd:#d93025;--in:#f1f3f5;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12151b;--card:#1c212b;--tx:#e8eaee;--mu:#98a0ad;--bd:#2c3340;--ac:#f0b90b;--gr:#2ebd85;--rd:#f6465d;--in:#262c38}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-system,"PingFang TC","Noto Sans TC",system-ui,sans-serif;line-height:1.5}
+.w{max-width:720px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:4px 0 2px}
+.sub{color:var(--mu);font-size:13px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:14px}
+.card h2{font-size:15px;margin:0 0 10px;color:var(--ac)}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+label{display:block;font-size:12px;color:var(--mu);margin-bottom:3px}
+input,select{width:100%;padding:10px;font-size:16px;border:1px solid var(--bd);border-radius:8px;background:var(--in);color:var(--tx)}
+.hint{font-size:11px;color:var(--mu);margin-top:2px}
+.big{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.k{background:var(--in);border-radius:8px;padding:10px}
+.k b{display:block;font-size:12px;color:var(--mu);font-weight:400}
+.k span{font-size:18px;font-weight:600}
+.gr{color:var(--gr)}.rd{color:var(--rd)}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap}
+th,td{padding:7px 6px;border-bottom:1px solid var(--bd);text-align:right}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--mu);font-weight:500;font-size:12px}
+tr.hl td{background:var(--in);font-weight:600}
+.note{font-size:12px;color:var(--mu)}
+</style>
+</head>
+<body>
+<div class="w">
+<h1>MYX 補倉套利計算器</h1>
+<div class="sub">輸入你的倉位和這次補倉資料，自動算出該賣多少錢。</div>
+
+<div class="card">
+<h2>① 你現在的倉位</h2>
+<div class="g">
+<div><label>目前均價（USDT）</label><input id="avg" type="number" step="any" inputmode="decimal"><div class="hint">倉位頁的「開倉價格」</div></div>
+<div><label>目前持有幾顆幣（MYX）</label><input id="qty" type="number" step="any" inputmode="decimal"><div class="hint">持倉USDT ÷ 標記價</div></div>
+<div style="grid-column:1/-1"><label>想靠套利賺回多少虧損（USDT）</label><input id="loss" type="number" step="any" inputmode="decimal"></div>
+</div>
+</div>
+
+<div class="card">
+<h2>② 這次補倉</h2>
+<div class="g">
+<div><label>補倉買價（USDT）</label><input id="p" type="number" step="any" inputmode="decimal"></div>
+<div><label>補多少 U</label><input id="amt" type="number" step="any" inputmode="decimal"></div>
+<div><label>這個金額是…</label><select id="mode"><option value="m">保證金（會乘槓桿）</option><option value="n">名目價值（不乘槓桿）</option></select></div>
+<div><label>槓桿倍數</label><input id="lev" type="number" step="any" inputmode="decimal"></div>
+<div><label>單邊手續費 %</label><input id="fee" type="number" step="any" inputmode="decimal"><div class="hint">填你帳戶的費率</div></div>
+<div><label>想賺多少 %（扣完手續費）</label><input id="goal" type="number" step="any" inputmode="decimal"><div class="hint">賺的是這筆補倉本身</div></div>
+</div>
+</div>
+
+<div class="card">
+<h2>③ 這筆補倉的結果</h2>
+<div class="big" id="r1"></div>
+</div>
+
+<div class="card">
+<h2>④ 如果只是補進去不賣（攤平）</h2>
+<div class="big" id="r2"></div>
+<div class="note" style="margin-top:8px">不含手續費。這是補倉後整個倉位的新均價。</div>
+</div>
+
+<div class="card">
+<h2>⑤ 不同目標的賣價對照</h2>
+<div class="tw"><table id="tb"></table></div>
+<div class="note" style="margin-top:8px">「要幾次」= 想賺回的虧損 ÷ 每次賺的錢，假設每次都用同樣金額、同樣目標。</div>
+</div>
+<div class="note">資金費率未計入。純數學試算，不保證價格會到。</div>
+</div>
+<script>
+var ids=["avg","qty","loss","p","amt","mode","lev","fee","goal"];
+function $(i){return document.getElementById(i)}
+function f(x,d){if(!isFinite(x))return "-";return x.toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d})}
+function pr(x){return isFinite(x)?x.toFixed(5):"-"}
+function k(t,v,c){return '<div class="k"><b>'+t+'</b><span class="'+(c||"")+'">'+v+'</span></div>'}
+function calc(){
+var A=+$("avg").value,Q=+$("qty").value,D=+$("loss").value,P=+$("p").value,a=+$("amt").value,L=+$("lev").value||1,fe=(+$("fee").value)/100,g=(+$("goal").value)/100;
+var n=$("mode").value==="m"?a*L:a, q=n/P;
+function sell(r){return P*(1+fe+r)/(1-fe)}
+var be=sell(0),tg=sell(g),pf=n*g;
+$("r1").innerHTML=k("補進的名目價值",f(n,2)+" U")+k("買到幾顆幣",f(q,0)+" 顆")
++k("保本賣價（不賺不賠）",pr(be))+k("目標賣價（賺 "+(g*100)+"%）",pr(tg),"gr")
++k("賣價比買價高",f((tg/P-1)*100,2)+"%")+k("這次淨賺",f(pf,2)+" U","gr")
++k("要幾次才賺回虧損",f(D/pf,1)+" 次");
+var nQ=Q+q,nA=(Q*A+q*P)/nQ;
+$("r2").innerHTML=k("補倉後新均價",pr(nA))+k("補倉後總幣量",f(nQ,0)+" 顆")
++k("均價降低",f((1-nA/A)*100,2)+"%","gr")+k("從補倉價要漲幾 % 才回本",f((nA/P-1)*100,2)+"%");
+var rs=[0.03,0.05,0.08,0.10,0.15,0.20],h='<tr><th>目標賺</th><th>賣價</th><th>比買價高</th><th>每次賺(U)</th><th>要幾次</th></tr>';
+rs.forEach(function(r){var s=sell(r),p=n*r;h+='<tr'+(Math.abs(r-g)<1e-9?' class="hl"':'')+'><td>'+(r*100)+'%</td><td>'+pr(s)+'</td><td>+'+f((s/P-1)*100,2)+'%</td><td>'+f(p,2)+'</td><td>'+f(D/p,1)+'</td></tr>'});
+$("tb").innerHTML=h;
+}
+ids.forEach(function(i){$(i).addEventListener("input",calc);$(i).addEventListener("change",calc)});
+calc();
+</script>
+</body>
+</html>
